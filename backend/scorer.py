@@ -4,17 +4,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(__file__))
+
+from calibration.parameters import ParameterSet, DEFAULT_PARAMS
+
 
 @dataclass
 class ScoreBreakdown:
-    aug_accessibility_score: int = 0
-    codon_optimality_score: int = 0
-    nterm_codon_score: int = 0
-    uorf_score: int = 0
-    kozak_score: int = 0
-    utr_composition_score: int = 0
-    utr_structure_score: int = 0
-    total_score: int = 0
+    aug_accessibility_score: float = 0.0
+    codon_optimality_score: float = 0.0
+    nterm_codon_score: float = 0.0
+    uorf_score: float = 0.0
+    kozak_score: float = 0.0
+    utr_composition_score: float = 0.0
+    utr_structure_score: float = 0.0
+    total_score: float = 0.0
 
 
 @dataclass
@@ -27,94 +33,95 @@ class ScorerResult:
     prioritized_fixes: list[str] = field(default_factory=list)
 
 
-def _score_aug(accessibility: float) -> int:
-    if accessibility >= 0.85:
-        return 25
-    if accessibility >= 0.70:
-        return 19
-    if accessibility >= 0.50:
-        return 11
-    if accessibility >= 0.30:
-        return 5
-    return 0
+def _score_aug(accessibility: float, p: ParameterSet) -> float:
+    if accessibility >= p.aug_bp1:
+        return p.w_aug * p.aug_frac1
+    if accessibility >= p.aug_bp2:
+        return p.w_aug * p.aug_frac2
+    if accessibility >= p.aug_bp3:
+        return p.w_aug * p.aug_frac3
+    if accessibility >= p.aug_bp4:
+        return p.w_aug * p.aug_frac4
+    return 0.0
 
 
-def _score_cos(cos: float) -> int:
-    if cos >= 0.05:
-        return 20
-    if cos >= 0.02:
-        return 15
-    if cos >= -0.02:
-        return 10
-    if cos >= -0.05:
-        return 5
-    return 0
+def _score_cos(cos: float, p: ParameterSet) -> float:
+    if cos >= p.cos_bp1:
+        return p.w_cos * p.cos_frac1
+    if cos >= p.cos_bp2:
+        return p.w_cos * p.cos_frac2
+    if cos >= p.cos_bp3:
+        return p.w_cos * p.cos_frac3
+    if cos >= p.cos_bp4:
+        return p.w_cos * p.cos_frac4
+    return 0.0
 
 
-def _score_nterm(nterm_cos: float) -> int:
-    if nterm_cos > 0:
-        return 10
-    if nterm_cos >= -0.1:
-        return 7
-    if nterm_cos >= -0.2:
-        return 3
-    return 0
+def _score_nterm(nterm_cos: float, p: ParameterSet) -> float:
+    if nterm_cos > p.nterm_bp1:
+        return p.w_nterm * p.nterm_frac1
+    if nterm_cos >= p.nterm_bp2:
+        return p.w_nterm * p.nterm_frac2
+    if nterm_cos >= p.nterm_bp3:
+        return p.w_nterm * p.nterm_frac3
+    return 0.0
 
 
-def _score_uorf(total: int, high_impact: int) -> int:
+def _score_uorf(total: int, high_impact: int, p: ParameterSet) -> float:
     if total == 0:
-        return 15
+        return p.w_uorf * p.uorf_frac_none
     if total <= 2 and high_impact == 0:
-        return 11
+        return p.w_uorf * p.uorf_frac_few_low
     if total <= 2:
-        return 5
+        return p.w_uorf * p.uorf_frac_few_high
     if high_impact == 0:
-        return 7
-    return 0
+        return p.w_uorf * p.uorf_frac_many_low
+    return 0.0
 
 
-def _score_kozak(kozak_score: int) -> int:
-    if kozak_score >= 6:
-        return 10
-    if kozak_score >= 4:
-        return 6
-    return 0
+def _score_kozak(kozak_score: int, p: ParameterSet) -> float:
+    if kozak_score >= p.kozak_bp1:
+        return p.w_kozak * p.kozak_frac1
+    if kozak_score >= p.kozak_bp2:
+        return p.w_kozak * p.kozak_frac2
+    return 0.0
 
 
-def _score_utr_composition(au_content: float, gg_frequency: float, utr_length: int) -> int:
-    if au_content >= 65:
-        score = 10
-    elif au_content >= 55:
-        score = 7
-    elif au_content >= 45:
-        score = 4
+def _score_utr_composition(au_content: float, gg_frequency: float,
+                            utr_length: int, p: ParameterSet) -> float:
+    if au_content >= p.utr_comp_au_bp1:
+        score = p.w_utr_comp * p.utr_comp_au_frac1
+    elif au_content >= p.utr_comp_au_bp2:
+        score = p.w_utr_comp * p.utr_comp_au_frac2
+    elif au_content >= p.utr_comp_au_bp3:
+        score = p.w_utr_comp * p.utr_comp_au_frac3
     else:
-        score = 0
-    if gg_frequency > 5:
-        score -= 3
-    if utr_length > 500:
-        score -= 2
-    return max(0, score)
+        score = 0.0
+    if gg_frequency > p.utr_comp_gg_thresh:
+        score -= p.utr_comp_gg_penalty
+    if utr_length > p.utr_comp_len_thresh:
+        score -= p.utr_comp_len_penalty
+    return max(0.0, score)
 
 
-def _score_utr_structure(mfe: float) -> int:
-    if mfe > -5:
-        return 10
-    if mfe >= -15:
-        return 7
-    if mfe >= -30:
-        return 4
-    if mfe >= -50:
-        return 2
-    return 0
+def _score_utr_structure(mfe: float, p: ParameterSet) -> float:
+    if mfe > p.utr_struct_bp1:
+        return p.w_utr_struct * p.utr_struct_frac1
+    if mfe >= p.utr_struct_bp2:
+        return p.w_utr_struct * p.utr_struct_frac2
+    if mfe >= p.utr_struct_bp3:
+        return p.w_utr_struct * p.utr_struct_frac3
+    if mfe >= p.utr_struct_bp4:
+        return p.w_utr_struct * p.utr_struct_frac4
+    return 0.0
 
 
-def _rating(score: int) -> tuple[str, str]:
-    if score >= 85:
+def _rating(score: float, p: ParameterSet) -> tuple[str, str]:
+    if score >= p.rating_high:
         return "High Efficiency", "green"
-    if score >= 65:
+    if score >= p.rating_moderate:
         return "Moderate Efficiency", "yellow"
-    if score >= 40:
+    if score >= p.rating_low:
         return "Low Efficiency", "orange"
     return "Poor Efficiency", "red"
 
@@ -133,62 +140,67 @@ def compute_score(
     utr_mfe: float,
     ires_detected: bool = False,
     aug_skipped: bool = False,
+    params: ParameterSet | None = None,
 ) -> ScorerResult:
-    """Compute composite score with IRES/truncation adjustments."""
+    """Compute composite score with IRES/truncation adjustments.
+
+    If params is None, uses the default (literature-based) parameter set.
+    """
+    p = params if params is not None else DEFAULT_PARAMS
     result = ScorerResult()
     s = result.scores
 
     # Compute raw subscores
-    s.aug_accessibility_score = _score_aug(aug_accessibility)
-    s.codon_optimality_score = _score_cos(cos)
-    s.nterm_codon_score = _score_nterm(nterm_cos)
-    s.uorf_score = _score_uorf(total_uaugs, high_impact_uaugs)
-    s.kozak_score = _score_kozak(kozak_score_val)
-    s.utr_composition_score = _score_utr_composition(au_content, gg_frequency, utr_length)
-    s.utr_structure_score = _score_utr_structure(utr_mfe)
+    s.aug_accessibility_score = _score_aug(aug_accessibility, p)
+    s.codon_optimality_score = _score_cos(cos, p)
+    s.nterm_codon_score = _score_nterm(nterm_cos, p)
+    s.uorf_score = _score_uorf(total_uaugs, high_impact_uaugs, p)
+    s.kozak_score = _score_kozak(kozak_score_val, p)
+    s.utr_composition_score = _score_utr_composition(au_content, gg_frequency, utr_length, p)
+    s.utr_structure_score = _score_utr_structure(utr_mfe, p)
 
     if ires_detected:
         # Suppress UTR-dependent scores, redistribute to codon-based
         suppressed = s.aug_accessibility_score + s.uorf_score + s.utr_structure_score
-        s.aug_accessibility_score = 0
-        s.uorf_score = 0
-        s.utr_structure_score = 0
-        # Scale codon scores proportionally
+        s.aug_accessibility_score = 0.0
+        s.uorf_score = 0.0
+        s.utr_structure_score = 0.0
         codon_total = s.codon_optimality_score + s.nterm_codon_score
-        max_codon = 30  # 20 + 10
         if codon_total > 0:
             scale = (codon_total + suppressed) / codon_total
-            s.codon_optimality_score = min(int(s.codon_optimality_score * scale), 45)
-            s.nterm_codon_score = min(int(s.nterm_codon_score * scale), 20)
+            s.codon_optimality_score = min(s.codon_optimality_score * scale, p.w_cos * 2.25)
+            s.nterm_codon_score = min(s.nterm_codon_score * scale, p.w_nterm * 2.0)
 
     if aug_skipped and not ires_detected:
-        # Redistribute AUG weight
         lost = s.aug_accessibility_score
-        s.aug_accessibility_score = 0
+        s.aug_accessibility_score = 0.0
         remaining_total = (s.codon_optimality_score + s.nterm_codon_score +
                            s.uorf_score + s.kozak_score +
                            s.utr_composition_score + s.utr_structure_score)
         if remaining_total > 0:
             scale = (remaining_total + lost) / remaining_total
-            s.codon_optimality_score = min(int(s.codon_optimality_score * scale), 30)
-            s.nterm_codon_score = min(int(s.nterm_codon_score * scale), 15)
-            s.uorf_score = min(int(s.uorf_score * scale), 20)
+            s.codon_optimality_score = min(s.codon_optimality_score * scale, p.w_cos * 1.5)
+            s.nterm_codon_score = min(s.nterm_codon_score * scale, p.w_nterm * 1.5)
+            s.uorf_score = min(s.uorf_score * scale, p.w_uorf * (4 / 3))
 
     s.total_score = (s.aug_accessibility_score + s.codon_optimality_score +
                      s.nterm_codon_score + s.uorf_score + s.kozak_score +
                      s.utr_composition_score + s.utr_structure_score)
 
-    result.rating, result.rating_color = _rating(s.total_score)
+    # Round for display (keep float internally for optimization)
+    s.total_score = round(s.total_score, 2)
+
+    result.rating, result.rating_color = _rating(s.total_score, p)
 
     # Find primary bottleneck
     subscales = {
-        "AUG Accessibility": (s.aug_accessibility_score, 25),
-        "Codon Optimality": (s.codon_optimality_score, 20),
-        "N-terminal Codons": (s.nterm_codon_score, 10),
-        "uORF Burden": (s.uorf_score, 15),
-        "Kozak Context": (s.kozak_score, 10),
-        "5' UTR Composition": (s.utr_composition_score, 10),
-        "5' UTR Structure": (s.utr_structure_score, 10),
+        "AUG Accessibility": (s.aug_accessibility_score, p.w_aug),
+        "Codon Optimality": (s.codon_optimality_score, p.w_cos),
+        "N-terminal Codons": (s.nterm_codon_score, p.w_nterm),
+        "uORF Burden": (s.uorf_score, p.w_uorf),
+        "Kozak Context": (s.kozak_score, p.w_kozak),
+        "5' UTR Composition": (s.utr_composition_score, p.w_utr_comp),
+        "5' UTR Structure": (s.utr_structure_score, p.w_utr_struct),
     }
 
     if ires_detected:
@@ -212,7 +224,7 @@ def compute_score(
     return result
 
 
-def _generate_summary(bottleneck: str, subscales: dict, total: int) -> str:
+def _generate_summary(bottleneck: str, subscales: dict, total: float) -> str:
     explanations = {
         "AUG Accessibility": (
             "The start codon region appears to be sequestered in secondary structure, "

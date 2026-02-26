@@ -47,15 +47,15 @@ Overall Codon Optimality Score (COS) based on the fraction of positive vs. negat
 
 First 10 codons after start methionine scored separately. RiboNN found ~2x per-residue impact on TE for N-terminal codons compared to mid-CDS codons.
 
-### uORF Burden (15 pts) — Moderate confidence
+### uORF Burden (13 pts) — Moderate confidence
 
 Upstream AUGs in the 5' UTR that may compete with the main CDS for ribosome initiation. Overlapping ORFs (oORFs) and close-proximity uAUGs classified as high impact.
 
-### Kozak Context (10 pts) — High confidence
+### Kozak Context (8 pts) — High confidence
 
 Sequence context around the start codon scored against consensus. Positions -3 (A/G) and +4 (G) are most critical.
 
-### 5' UTR Composition (10 pts) — Moderate confidence
+### 5' UTR Composition (14 pts) — Empirically calibrated
 
 AU content, GG dinucleotide frequency, and UTR length. AU-rich, shorter UTRs correlate with higher TE.
 

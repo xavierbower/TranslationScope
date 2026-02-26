@@ -8,3 +8,4 @@ frontend/dist/
 .env
 *.egg-info/
 .DS_Store
+backend/calibration_data/
