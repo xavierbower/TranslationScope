@@ -171,6 +171,12 @@ export default function App() {
           >
             Analyze
           </button>
+
+          <div className="mt-6 flex items-center justify-center gap-3 text-xs text-gray-400">
+            <a href="https://xavbio.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">xavbio.com</a>
+            <span>·</span>
+            <a href="https://buymeacoffee.com/xavbio" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">Buy me a coffee ☕</a>
+          </div>
         </div>
       </div>
     )
@@ -427,6 +433,12 @@ function ResultsView({ data, onReset, onExport }) {
             tool is intended to guide construct design decisions, not to produce precise TE predictions.
             For state-of-the-art mammalian TE modeling, see RiboNN (github.com/Sanofi-Public/RiboNN).
           </div>
+        </div>
+
+        <div className="flex items-center justify-center gap-3 text-xs text-gray-400 mt-6 mb-4 no-print">
+          <a href="https://xavbio.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">xavbio.com</a>
+          <span>·</span>
+          <a href="https://buymeacoffee.com/xavbio" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">Buy me a coffee ☕</a>
         </div>
       </div>
     </div>
