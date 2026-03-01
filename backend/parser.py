@@ -9,6 +9,7 @@ from typing import Any
 
 from Bio import SeqIO
 from Bio.Seq import Seq
+from Bio.SeqFeature import CompoundLocation
 from snapgene_reader import snapgene_file_to_seqrecord
 
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
@@ -27,6 +28,15 @@ BACKBONE_MARKERS = {"rep", "ori"}
 EXCLUDE_MARKERS = RESISTANCE_MARKERS | REPORTER_MARKERS | BACKBONE_MARKERS
 
 STOP_CODONS = {"UAA", "UAG", "UGA"}
+VALID_RNA = set("AUGC")
+
+
+def _sanitize_rna(rna: str) -> tuple[str, bool]:
+    """Remove non-AUGC characters from RNA. Returns (cleaned, had_ambiguous)."""
+    if all(c in VALID_RNA for c in rna):
+        return rna, False
+    cleaned = "".join(c for c in rna if c in VALID_RNA)
+    return cleaned, True
 
 
 @dataclass
@@ -177,6 +187,32 @@ def select_cds_candidates(features: list[Any]) -> ParseResult:
     return result
 
 
+def _extract_feature_dna(feat, full_seq: str) -> str:
+    """Extract DNA for a feature, handling compound/join locations."""
+    if isinstance(feat.location, CompoundLocation):
+        # Multi-exon: concatenate each part in order
+        parts = []
+        for part in feat.location.parts:
+            segment = full_seq[int(part.start):int(part.end)]
+            if part.strand == -1:
+                segment = str(Seq(segment).reverse_complement())
+            parts.append(segment)
+        cds_dna = "".join(parts)
+        # For compound locations on the minus strand, the parts are already
+        # individually reverse-complemented; if the overall feature is minus-strand
+        # and the parts weren't individually flagged, reverse the whole thing
+        if feat.location.strand == -1 and all(p.strand != -1 for p in feat.location.parts):
+            cds_dna = str(Seq(cds_dna).reverse_complement())
+        return cds_dna
+    else:
+        start = int(feat.location.start)
+        end = int(feat.location.end)
+        cds_dna = full_seq[start:end]
+        if (feat.location.strand or 1) == -1:
+            cds_dna = str(Seq(cds_dna).reverse_complement())
+        return cds_dna
+
+
 def extract_sequences(
     file_bytes: bytes,
     selected_feature_index: int,
@@ -194,13 +230,17 @@ def extract_sequences(
 
     res = ExtractionResult(gene_name=lab, is_circular=is_circular, strand=strand)
 
-    # Extract CDS DNA
-    cds_dna = full_seq[start:end]
-    if strand == -1:
-        cds_dna = str(Seq(cds_dna).reverse_complement())
+    # Extract CDS DNA (handles compound/join locations)
+    cds_dna = _extract_feature_dna(feat, full_seq)
 
-    # Transcribe to RNA
-    cds_rna = cds_dna.replace("T", "U")
+    # Transcribe to RNA and sanitize
+    cds_rna = cds_dna.replace("T", "U").upper()
+    cds_rna, had_ambiguous = _sanitize_rna(cds_rna)
+    if had_ambiguous:
+        res.warnings.append(
+            "Ambiguous bases (N, R, Y, etc.) detected in CDS and removed. "
+            "Codon analysis may be slightly affected."
+        )
     if len(cds_rna) % 3 != 0:
         res.warnings.append(
             "CDS length is not divisible by 3. Possible annotation error. Codon analysis may be unreliable."
@@ -273,6 +313,11 @@ def extract_sequences(
         )
 
     utr_rna = utr_dna.replace("T", "U").upper()
+    utr_rna, utr_ambiguous = _sanitize_rna(utr_rna)
+    if utr_ambiguous and not had_ambiguous:
+        res.warnings.append(
+            "Ambiguous bases detected in UTR region and removed."
+        )
     res.utr_sequence = utr_rna
     res.aug_position = len(utr_rna)
     res.full_sequence = utr_rna + cds_rna

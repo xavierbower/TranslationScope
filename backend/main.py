@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 import os
+import traceback
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +23,8 @@ from codon_analyzer import (
 )
 from reference_distributions import get_percentile
 from scorer import compute_score
+
+logger = logging.getLogger("translationscope")
 
 app = FastAPI(title="TranslationScope", version="1.0.0")
 
@@ -68,13 +72,12 @@ async def parse_dna(file: UploadFile = File(...)):
     contents = await file.read()
     try:
         record, features, is_circular, full_seq = parse_file(contents, file.filename)
-    except ValueError as e:
-        raise HTTPException(400, str(e))
-
-    try:
         result = select_cds_candidates(features)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("Unexpected error parsing %s: %s\n%s", file.filename, e, traceback.format_exc())
+        raise HTTPException(400, f"Failed to parse file: {e}")
 
     _file_cache[file.filename] = contents
 
@@ -121,78 +124,85 @@ async def analyze(
         extraction = extract_sequences(contents, selected_cds_index, fname)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error("Unexpected error parsing %s: %s\n%s", fname, e, traceback.format_exc())
+        raise HTTPException(400, f"Failed to parse file: {e}")
 
-    warnings = list(extraction.warnings)
+    try:
+        warnings = list(extraction.warnings)
 
-    # Collect feature labels
-    feature_labels = []
-    for f in features:
-        for key in ("label", "gene", "product", "note"):
-            feature_labels.extend(f.qualifiers.get(key, []))
+        # Collect feature labels
+        feature_labels = []
+        for f in features:
+            for key in ("label", "gene", "product", "note"):
+                feature_labels.extend(f.qualifiers.get(key, []))
 
-    # Run screens
-    screens = run_screens(extraction.utr_sequence, extraction.cds_sequence, feature_labels)
-    warnings.extend(screens.warnings)
+        # Run screens
+        screens = run_screens(extraction.utr_sequence, extraction.cds_sequence, feature_labels)
+        warnings.extend(screens.warnings)
 
-    # Structure analysis
-    utr_fold = fold_utr(extraction.utr_sequence)
-    aug_result = compute_aug_accessibility(extraction.utr_sequence, extraction.cds_sequence)
-    cds_windows = sliding_window_cds(extraction.cds_sequence)
+        # Structure analysis
+        utr_fold = fold_utr(extraction.utr_sequence)
+        aug_result = compute_aug_accessibility(extraction.utr_sequence, extraction.cds_sequence)
+        cds_windows = sliding_window_cds(extraction.cds_sequence)
 
-    if aug_result.skipped:
-        warnings.append(aug_result.skip_reason)
+        if aug_result.skipped:
+            warnings.append(aug_result.skip_reason)
 
-    # Codon analysis
-    codons = analyze_codons(extraction.cds_sequence, expression_system)
-    uorfs = analyze_uorfs(extraction.utr_sequence)
-    kozak = analyze_kozak(extraction.utr_sequence, extraction.cds_sequence)
-    utr_comp = analyze_utr_composition(extraction.utr_sequence)
-    lengths = compute_lengths(extraction.utr_sequence, extraction.cds_sequence)
+        # Codon analysis
+        codons = analyze_codons(extraction.cds_sequence, expression_system)
+        uorfs = analyze_uorfs(extraction.utr_sequence)
+        kozak = analyze_kozak(extraction.utr_sequence, extraction.cds_sequence)
+        utr_comp = analyze_utr_composition(extraction.utr_sequence)
+        lengths = compute_lengths(extraction.utr_sequence, extraction.cds_sequence)
 
-    if codons.nterm_flag:
-        warnings.append(
-            "Warning: multiple unfavorable codons in the critical N-terminal window (codons 1-10). "
-            "This region has disproportionate impact on translation efficiency."
-        )
+        if codons.nterm_flag:
+            warnings.append(
+                "Warning: multiple unfavorable codons in the critical N-terminal window (codons 1-10). "
+                "This region has disproportionate impact on translation efficiency."
+            )
 
-    # Non-mammalian system warning
-    if expression_system != "mammalian":
-        system_labels = {
-            "ecoli": "E. coli",
-            "yeast": "Yeast (S. cerevisiae)",
-            "insect": "Insect (Sf9)",
+        # Non-mammalian system warning
+        if expression_system != "mammalian":
+            system_labels = {
+                "ecoli": "E. coli",
+                "yeast": "Yeast (S. cerevisiae)",
+                "insect": "Insect (Sf9)",
+            }
+            warnings.append(
+                f"Codon preferences shown for {system_labels.get(expression_system, expression_system)}. "
+                "UTR structure and AUG accessibility scores assume cap-dependent eukaryotic initiation "
+                "and may not apply to your expression context."
+            )
+
+        # Percentiles
+        percentiles = {
+            "cos_percentile": get_percentile("cos", codons.cos),
+            "utr_length_percentile": get_percentile("utr_length", utr_comp.utr_length),
+            "au_content_percentile": get_percentile("au_content", utr_comp.au_content),
+            "aug_accessibility_percentile": get_percentile("aug_accessibility", aug_result.aug_accessibility) if not aug_result.skipped else None,
+            "cds_length_percentile": get_percentile("cds_length", lengths.cds_length),
         }
-        warnings.append(
-            f"Codon preferences shown for {system_labels.get(expression_system, expression_system)}. "
-            "UTR structure and AUG accessibility scores assume cap-dependent eukaryotic initiation "
-            "and may not apply to your expression context."
+
+        # Scoring
+        score_result = compute_score(
+            aug_accessibility=aug_result.aug_accessibility,
+            cos=codons.cos,
+            nterm_cos=codons.nterm_cos,
+            nterm_codons=codons.nterm_codons,
+            total_uaugs=uorfs.total_uaugs,
+            high_impact_uaugs=uorfs.high_impact_uaugs,
+            kozak_score_val=kozak.kozak_score,
+            au_content=utr_comp.au_content,
+            gg_frequency=utr_comp.gg_frequency,
+            utr_length=utr_comp.utr_length,
+            utr_mfe=utr_fold.mfe if not utr_fold.skipped else 0,
+            ires_detected=screens.ires_detected,
+            aug_skipped=aug_result.skipped,
         )
-
-    # Percentiles
-    percentiles = {
-        "cos_percentile": get_percentile("cos", codons.cos),
-        "utr_length_percentile": get_percentile("utr_length", utr_comp.utr_length),
-        "au_content_percentile": get_percentile("au_content", utr_comp.au_content),
-        "aug_accessibility_percentile": get_percentile("aug_accessibility", aug_result.aug_accessibility) if not aug_result.skipped else None,
-        "cds_length_percentile": get_percentile("cds_length", lengths.cds_length),
-    }
-
-    # Scoring
-    score_result = compute_score(
-        aug_accessibility=aug_result.aug_accessibility,
-        cos=codons.cos,
-        nterm_cos=codons.nterm_cos,
-        nterm_codons=codons.nterm_codons,
-        total_uaugs=uorfs.total_uaugs,
-        high_impact_uaugs=uorfs.high_impact_uaugs,
-        kozak_score_val=kozak.kozak_score,
-        au_content=utr_comp.au_content,
-        gg_frequency=utr_comp.gg_frequency,
-        utr_length=utr_comp.utr_length,
-        utr_mfe=utr_fold.mfe if not utr_fold.skipped else 0,
-        ires_detected=screens.ires_detected,
-        aug_skipped=aug_result.skipped,
-    )
+    except Exception as e:
+        logger.error("Analysis failed for %s: %s\n%s", fname, e, traceback.format_exc())
+        raise HTTPException(400, f"Analysis failed: {e}")
 
     return {
         "gene_name": extraction.gene_name,

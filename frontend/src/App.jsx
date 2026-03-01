@@ -11,6 +11,24 @@ import RatingBadge from './components/RatingBadge'
 
 const API = import.meta.env.DEV ? 'http://localhost:8000' : ''
 
+async function safeFetch(url, opts) {
+  let res
+  try {
+    res = await fetch(url, opts)
+  } catch (e) {
+    throw new Error('Network error — the server may be starting up. Please try again in a few seconds.')
+  }
+  if (!res.ok) {
+    let detail
+    try {
+      const body = await res.json()
+      detail = body.detail
+    } catch { /* response wasn't JSON */ }
+    throw new Error(detail || `Request failed (HTTP ${res.status})`)
+  }
+  return res.json()
+}
+
 const STEPS = [
   'Parsing file...', 'Screening sequences...', 'Folding RNA...',
   'Scoring codons...', 'Analyzing uORFs...', 'Calculating scores...',
@@ -39,21 +57,14 @@ export default function App() {
       setLoadingStep(0)
       const form1 = new FormData()
       form1.append('file', file1)
-      const parseRes = await fetch(`${API}/parse`, { method: 'POST', body: form1 })
-      if (!parseRes.ok) {
-        const err = await parseRes.json()
-        throw new Error(err.detail || 'Parse failed')
-      }
-      const parsed = await parseRes.json()
+      const parsed = await safeFetch(`${API}/parse`, { method: 'POST', body: form1 })
 
       // Parse file 2 if compare mode
       let parsed2 = null
       if (compareMode && file2) {
         const form2 = new FormData()
         form2.append('file', file2)
-        const parseRes2 = await fetch(`${API}/parse`, { method: 'POST', body: form2 })
-        if (!parseRes2.ok) throw new Error('Failed to parse second file')
-        parsed2 = await parseRes2.json()
+        parsed2 = await safeFetch(`${API}/parse`, { method: 'POST', body: form2 })
       }
 
       // Check if CDS selection needed
@@ -79,13 +90,8 @@ export default function App() {
     form.append('selected_cds_index', cdsIdx)
     form.append('expression_system', system)
 
-    const res = await fetch(`${API}/analyze`, { method: 'POST', body: form })
-    if (!res.ok) {
-      const err = await res.json()
-      throw new Error(err.detail || 'Analysis failed')
-    }
+    const data = await safeFetch(`${API}/analyze`, { method: 'POST', body: form })
     setLoadingStep(4)
-    const data = await res.json()
     setResults(data)
 
     if (parsed2 && cdsIdx2 !== null && cdsIdx2 !== undefined) {
@@ -93,10 +99,10 @@ export default function App() {
       form2.append('filename', parsed2.filename)
       form2.append('selected_cds_index', cdsIdx2)
       form2.append('expression_system', system)
-      const res2 = await fetch(`${API}/analyze`, { method: 'POST', body: form2 })
-      if (res2.ok) {
-        setResults2(await res2.json())
-      }
+      try {
+        const data2 = await safeFetch(`${API}/analyze`, { method: 'POST', body: form2 })
+        setResults2(data2)
+      } catch { /* second file analysis is best-effort */ }
     }
 
     setLoadingStep(5)

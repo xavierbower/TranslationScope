@@ -153,10 +153,22 @@ def compute_aug_accessibility(utr_sequence: str, cds_sequence: str) -> AugAccess
     )
 
 
+MAX_CDS_WINDOWS = 200  # Cap total fold calls to prevent OOM/timeout
+
+
 def sliding_window_cds(cds_sequence: str, window_size: int = 40, step: int = 10) -> list[CdsWindow]:
     """Sliding window MFE across CDS."""
+    cds_len = len(cds_sequence)
+    if cds_len < window_size:
+        return []
+
+    # Increase step size for very large CDS to stay within window cap
+    num_windows = (cds_len - window_size) // step + 1
+    if num_windows > MAX_CDS_WINDOWS:
+        step = max(step, (cds_len - window_size) // MAX_CDS_WINDOWS + 1)
+
     results = []
-    for pos in range(0, len(cds_sequence) - window_size + 1, step):
+    for pos in range(0, cds_len - window_size + 1, step):
         window = cds_sequence[pos:pos + window_size]
         _, mfe = _fold(window)
         results.append(CdsWindow(
