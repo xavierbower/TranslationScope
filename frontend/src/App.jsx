@@ -181,7 +181,7 @@ export default function App() {
           <div className="mt-6 flex items-center justify-center gap-3 text-xs text-gray-400">
             <a href="https://xavbio.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">xavbio.com</a>
             <span>·</span>
-            <a href="https://buymeacoffee.com/xavbio" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">Buy me a coffee ☕</a>
+            <a href="https://xavbio.com/contact/" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">Submit ideas, feature requests, etc.</a>
           </div>
         </div>
       </div>
@@ -444,7 +444,7 @@ function ResultsView({ data, onReset, onExport }) {
         <div className="flex items-center justify-center gap-3 text-xs text-gray-400 mt-6 mb-4 no-print">
           <a href="https://xavbio.com" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">xavbio.com</a>
           <span>·</span>
-          <a href="https://buymeacoffee.com/xavbio" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">Buy me a coffee ☕</a>
+          <a href="https://xavbio.com/contact/" target="_blank" rel="noopener noreferrer" className="hover:text-gray-600 transition">Submit ideas, feature requests, etc.</a>
         </div>
       </div>
     </div>
